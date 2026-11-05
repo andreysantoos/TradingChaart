@@ -65,3 +65,19 @@
 
 3. **Compilação do Frontend:**
    - `npm run build`: Concluído sem erros (`tsc -b && vite build` em 332ms).
+
+
+## Segurança e Configurações do Repositório Remoto (GitHub)
+- **Repositório:** `https://github.com/andreysantoos/TradingChaart` (Público).
+- **Proteção da Branch `main`:** Ativada via GitHub API.
+  - Exigência de Pull Request para alterações de colaboradores.
+  - Bloqueio de Force Pushes (`allow_force_pushes: false`).
+  - Bloqueio de deleção acidental da branch (`allow_deletions: false`).
+  - Resolução obrigatória de conversas em PRs (`required_conversation_resolution: true`).
+- **GitHub Actions & Faturamento:**
+  - Desativado completamente no repositório (`enabled: false`).
+  - Garante que nenhum Pull Request ou commit execute runners automaticamente, protegendo os minutos e créditos da conta paga do GitHub.
+- **Proteção contra Vazamento de Credenciais:**
+  - `secret_scanning`: Ativado.
+  - `secret_scanning_push_protection`: Ativado (bloqueia na tentativa de push se qualquer token for detectado).
+  - `.gitignore`: Configurado para ignorar `.venv`, `.db`, `.wal`, `node_modules`, caches e logs.
