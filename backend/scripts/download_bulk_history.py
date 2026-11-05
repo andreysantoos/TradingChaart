@@ -11,7 +11,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
 
 import httpx
-from app.db.database import init_db, save_candles_agg, save_candles_1m
+from app.db.database import init_db, save_candles_agg, save_candles_1m, get_connection
 from app.models.schemas import CandleRecord
 from app.providers.binance_futures import binance_provider
 
@@ -111,6 +111,29 @@ async def fetch_symbol_klines(
                 await asyncio.sleep(2)
     return all_candles
 
+INTERVAL_MS = {
+    "1m": 60_000,
+    "5m": 300_000,
+    "15m": 900_000,
+    "1h": 3_600_000,
+    "4h": 14_400_000,
+    "1d": 86_400_000,
+    "1w": 604_800_000,
+}
+
+def get_existing_max_open(symbol: str, interval: str, is_1m: bool) -> int | None:
+    conn = get_connection()
+    try:
+        if is_1m:
+            row = conn.execute("SELECT MAX(open_time) FROM candles_1m WHERE symbol = ?", (symbol,)).fetchone()
+        else:
+            row = conn.execute("SELECT MAX(open_time) FROM candles_agg WHERE symbol = ? AND timeframe = ?", (symbol, interval)).fetchone()
+        return row[0] if row and row[0] is not None else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
 async def process_symbol_tier(
     semaphore: asyncio.Semaphore,
     client: httpx.AsyncClient,
@@ -121,7 +144,15 @@ async def process_symbol_tier(
     is_1m: bool = False
 ):
     async with semaphore:
-        candles = await fetch_symbol_klines(client, symbol, interval, start_time, end_time)
+        actual_start = start_time
+        latest_saved = get_existing_max_open(symbol, interval, is_1m)
+        if latest_saved is not None:
+            tolerance_ms = INTERVAL_MS.get(interval, 3_600_000) * 2
+            if latest_saved >= end_time - tolerance_ms:
+                return 0  # Já possui todo o histórico baixado, pula instantaneamente
+            actual_start = latest_saved + 1
+
+        candles = await fetch_symbol_klines(client, symbol, interval, actual_start, end_time)
         if not candles:
             return 0
         
