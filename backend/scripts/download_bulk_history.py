@@ -16,6 +16,7 @@ from app.models.schemas import CandleRecord
 from app.providers.binance_futures import binance_provider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("bulk_downloader")
 
 BASE_URL = "https://fapi.binance.com"
@@ -162,6 +163,7 @@ async def run_tier(
     print(f" De: {datetime.fromtimestamp(start_time/1000, tz=timezone.utc)} até {datetime.fromtimestamp(end_time/1000, tz=timezone.utc)}")
     print(f"=======================================================")
 
+    total_tier_candles = 0
     semaphore = asyncio.Semaphore(concurrency)
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=15.0) as client:
         for interval in intervals:
@@ -179,6 +181,9 @@ async def run_tier(
                 if idx % 25 == 0 or idx == len(symbols):
                     elapsed = time.time() - t0
                     print(f"  [{interval}] Progresso: {idx}/{len(symbols)} ativos processados | {total_candles} velas salvas ({elapsed:.1f}s)")
+            total_tier_candles += total_candles
+    print(f"\nTotal salvo no {tier_name}: {total_tier_candles} velas.")
+    return total_tier_candles
 
 async def main():
     parser = argparse.ArgumentParser(description="REA Top-Down Bulk Ingestion")
@@ -192,7 +197,7 @@ async def main():
     # Discover symbols
     print("Descobrindo contratos perpétuos USDT ativos...")
     all_sym_info = await binance_provider.get_symbols()
-    all_symbols = [s.symbol for s in all_sym_info]
+    all_symbols = [s.symbol for s in all_sym_info if s.quote_asset == "USDT"]
     print(f"Total descoberto: {len(all_symbols)} contratos.")
 
     if args.symbols.lower() != "all":
