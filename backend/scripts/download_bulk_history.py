@@ -79,6 +79,9 @@ async def fetch_symbol_klines(
                         return all_candles
                     
                     for k in data:
+                        # Historical imports never freeze an open candle as final.
+                        if int(k[6]) >= end_time:
+                            continue
                         all_candles.append({
                             "provider": "binance",
                             "market": "usds_m_futures",
@@ -147,10 +150,8 @@ async def process_symbol_tier(
         actual_start = start_time
         latest_saved = get_existing_max_open(symbol, interval, is_1m)
         if latest_saved is not None:
-            tolerance_ms = INTERVAL_MS.get(interval, 3_600_000) * 2
-            if latest_saved >= end_time - tolerance_ms:
-                return 0  # Já possui todo o histórico baixado, pula instantaneamente
-            actual_start = latest_saved + 1
+            # Revisit the last stored candle, including legacy incomplete imports.
+            actual_start = latest_saved
 
         candles = await fetch_symbol_klines(client, symbol, interval, actual_start, end_time)
         if not candles:

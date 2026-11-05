@@ -25,6 +25,7 @@ interface ChartContainerProps {
   isLogScale: boolean;
   indicators: IndicatorConfig[];
   isLoading: boolean;
+  pricePrecision: number;
 }
 
 export const ChartContainer: React.FC<ChartContainerProps> = ({
@@ -34,6 +35,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   isLogScale,
   indicators,
   isLoading,
+  pricePrecision,
 }) => {
   const mainChartRef = useRef<HTMLDivElement>(null);
   const rsiChartRef = useRef<HTMLDivElement>(null);
@@ -352,10 +354,23 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
 
   // Synchronize candles & indicator data
   useEffect(() => {
-    if (!candles || candles.length === 0 || !candleSeriesRef.current || !mainChartApi.current) return;
+    if (!candleSeriesRef.current || !mainChartApi.current) return;
+    if (candles.length === 0) {
+      for (const series of [candleSeriesRef, volumeSeriesRef, smaSeriesRef, emaSeriesRef,
+        bbUpperRef, bbMiddleRef, bbLowerRef, rsiSeriesRef, macdLineRef, macdSignalRef, macdHistRef]) {
+        series.current?.setData([]);
+      }
+      latestCandlesRef.current = [];
+      return;
+    }
+    const selectionChanged = prevSymbolRef.current !== `${symbol}_${timeframe}`;
+    const priceFormat = { type: 'price' as const, precision: pricePrecision, minMove: 10 ** -pricePrecision };
+    for (const series of [candleSeriesRef, smaSeriesRef, emaSeriesRef, bbUpperRef, bbMiddleRef, bbLowerRef]) {
+      series.current?.applyOptions({ priceFormat });
+    }
 
     latestCandlesRef.current = candles;
-    prevSymbolRef.current = symbol;
+    prevSymbolRef.current = `${symbol}_${timeframe}`;
 
     // Capture latest visible range before applying new data if user has customized zoom
     if (hasCustomZoomRef.current) {
@@ -480,12 +495,12 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     }
 
     // Ensure price scale automatically recalculates vertical bounds for new asset
-    mainChartApi.current.priceScale('right').applyOptions({
+    if (selectionChanged) mainChartApi.current.priceScale('right').applyOptions({
       autoScale: true,
     });
 
     requestAnimationFrame(() => {
-      mainChartApi.current?.priceScale('right').applyOptions({
+      if (selectionChanged) mainChartApi.current?.priceScale('right').applyOptions({
         autoScale: true,
       });
       requestAnimationFrame(() => {
@@ -503,7 +518,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       close: last.close,
       volume: last.volume,
     });
-  }, [candles, indicators, symbol]);
+  }, [candles, indicators, symbol, timeframe, pricePrecision]);
 
   return (
     <div className="chart-view-wrapper">
@@ -514,17 +529,20 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
           <span className="legend-timeframe">{timeframe}</span>
         </div>
 
-        {legendInfo.open !== undefined && (
+        {candles.length > 0 && legendInfo.open !== undefined && (
           <div className="legend-values">
-            <span>A: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.open.toFixed(2)}</strong></span>
-            <span>M: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.high?.toFixed(2)}</strong></span>
-            <span>m: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.low?.toFixed(2)}</strong></span>
-            <span>F: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.close?.toFixed(2)}</strong></span>
+            <span>A: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.open.toFixed(pricePrecision)}</strong></span>
+            <span>M: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.high?.toFixed(pricePrecision)}</strong></span>
+            <span>m: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.low?.toFixed(pricePrecision)}</strong></span>
+            <span>F: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.close?.toFixed(pricePrecision)}</strong></span>
             <span>Vol: <strong>{legendInfo.volume?.toFixed(3)}</strong></span>
             {legendInfo.time && <span className="legend-time">{legendInfo.time}</span>}
           </div>
         )}
 
+        {candles.length > 0 && candles[candles.length - 1].is_complete === false && (
+          <span className="loading-tag">Último candle em formação</span>
+        )}
         {isLoading && <span className="loading-tag">Carregando dados...</span>}
       </div>
 

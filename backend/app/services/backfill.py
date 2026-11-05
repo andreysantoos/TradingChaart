@@ -35,6 +35,7 @@ async def backfill_symbol_history(
             end_time=end_time,
             limit=batch_size
         )
+        candles = [c for c in candles if c.is_closed and c.close_time < int(time.time() * 1000)]
         if candles:
             # Mark origin as backfill
             for c in candles:

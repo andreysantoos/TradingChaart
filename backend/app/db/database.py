@@ -138,11 +138,16 @@ def get_candles_1m(symbol: str, start_time: Optional[int] = None, end_time: Opti
         query += " AND open_time <= ?"
         params.append(end_time)
         
-    query += " ORDER BY open_time ASC LIMIT ?"
+    # Without a start boundary, select the most recent page, then restore
+    # chronological order for aggregation and chart consumers.
+    order = "ASC" if start_time is not None else "DESC"
+    query += f" ORDER BY open_time {order} LIMIT ?"
     params.append(limit)
     
     rows = conn.execute(query, params).fetchall()
     conn.close()
+    if start_time is None:
+        rows.reverse()
     
     return [
         CandleRecord(
@@ -211,10 +216,13 @@ def get_candles_agg(symbol: str, timeframe: str, start_time: Optional[int] = Non
     if end_time is not None:
         query += " AND open_time <= ?"
         params.append(end_time)
-    query += " ORDER BY open_time ASC LIMIT ?"
+    order = "ASC" if start_time is not None else "DESC"
+    query += f" ORDER BY open_time {order} LIMIT ?"
     params.append(limit)
     rows = conn.execute(query, params).fetchall()
     conn.close()
+    if start_time is None:
+        rows.reverse()
     return [dict(r) for r in rows]
 
 def get_latest_1m_candle_time(symbol: str) -> Optional[int]:

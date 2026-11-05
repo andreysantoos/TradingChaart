@@ -36,8 +36,8 @@ class IngestionService:
             limit = 100
             start_time = None
         else:
-            # Query from next minute after latest recorded candle
-            start_time = latest_time + 60000
+            # Revisit the tail to finalize provisional or legacy imported candles
+            start_time = latest_time  # Re-fetch the tail: older imports may contain an unfinished candle.
             # If already up to date within the current minute, nothing to fetch
             if start_time >= now_ms - 60000:
                 return 0
@@ -56,7 +56,7 @@ class IngestionService:
             return 0
 
         # Filter out still unclosed candles (close_time > now_ms)
-        closed_candles = [c for c in candles if c.close_time <= now_ms]
+        closed_candles = [c for c in candles if c.is_closed and c.close_time < now_ms]
         if closed_candles:
             for c in closed_candles:
                 c.origin = "ingestion"

@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 from typing import Optional
 import httpx
@@ -87,6 +88,7 @@ class BinanceFuturesProvider(MarketDataProvider):
 
         for attempt in range(3):
             try:
+                requested_at_ms = int(time.time() * 1000)
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     raw_candles = resp.json()
@@ -118,7 +120,7 @@ class BinanceFuturesProvider(MarketDataProvider):
                                 volume=volume,
                                 quote_volume=quote_volume,
                                 trades_count=trades,
-                                is_closed=True,
+                                is_closed=close_time < requested_at_ms,
                                 origin="official"
                             )
                         )
