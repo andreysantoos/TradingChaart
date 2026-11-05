@@ -1,0 +1,20 @@
+# Environments & Runtimes
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data & SQLite databases
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+*.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs & Cache
+*.log
+.pytest_cache/

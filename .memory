@@ -1,0 +1,67 @@
+# REA Memory & Architecture Ledger
+
+## Identidade e Missão
+- Projeto: Plataforma Open Source de Análise Técnica do Mercado Financeiro.
+- Mercado Inicial: Contratos futuros perpétuos USDⓈ-M (Binance) via endpoints públicos REST sem autenticação.
+- Diferenciais Principais:
+  1. Infraestrutura canônica de candles de 1 minuto em UTC, agregação temporal determinística e reconciliação independente contra candles oficiais da exchange.
+  2. Mecanismo de rotação automática de ativos (Play) que percorre uma watchlist mantendo rigorosamente o timeframe, escala e indicadores técnicos ativos.
+
+## Decisões Arquiteturais
+
+### 1. Backend e Ingestão
+- **Linguagem / Framework:** Python 3.12 com FastAPI e Uvicorn.
+- **Persistência:** SQLite local com modo WAL (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`).
+- **Tabelas do Banco:**
+  - `candles_1m`: Chave primária `(provider, market, symbol, open_time)`. Granularidade canônica de 1 minuto.
+  - `candles_agg`: Cache de agregações completas.
+  - `reconciliations`: Auditoria independente de janelas comparadas com a API oficial.
+  - `watchlists`: Listas de ativos e preferências de rotação do usuário.
+- **Motor de Agregação:**
+  - Janelas UTC fechadas para 5m, 15m, 30m, 1h, 4h, 1d e 1w (semanal alinhado à segunda-feira 00:00:00 UTC).
+  - Regra de composição canônica: Open = primeiro candle 1m, High = maior máxima, Low = menor mínima, Close = último candle 1m, Volume = soma de volumes.
+  - Validação estrita de completude da janela antes de marcar como consolidada.
+- **Reconciliação Independente:**
+  - Compara preços (Open, High, Low, Close) com tolerância de 0.01% e volume com tolerância de 0.1%.
+  - Classificações: `APPROVED`, `DIVERGENT`, `INCOMPLETE`, `PENDING`, `ERROR`.
+- **Serviço de Ingestão Incremental:**
+  - Cadência de 1 minuto sincronizada com o fechamento do minuto em UTC mais margem de segurança configurável (2s).
+  - Recuperação automática de lacunas (gaps) para todos os ativos acompanhados.
+
+### 2. Frontend e Visualização
+- **Stack:** React 19, TypeScript, Vite, Lightweight Charts (v5.2.1), Lucide Icons.
+- **Componentes:**
+  - `Header`: Logotipo, seletor de contratos com busca dinâmica, botões de timeframe (1m a 1w), alternador Linear/Logarítmico, modal de indicadores, painel de controle Play/Pause/Stop, seletor de intervalo de rotação com indicador visual de progresso, botão da watchlist e indicador de saúde da pipeline de dados.
+  - `ChartContainer`: Canvas Lightweight Charts com série de velas (`CandlestickSeries`), histograma de volume com escala dedicada, sobreposições de SMA, EMA e Bandas de Bollinger, painéis inferiores independentes e sincronizados para RSI e MACD, e crosshair com legenda flutuante contendo valores de OHLCV em UTC.
+  - `WatchlistDrawer`: Adição, remoção, ordenação (subir/descer) de ativos da rotação automática.
+  - `IndicatorsModal`: Ativação, desativação e ajuste numérico de parâmetros para cada indicador.
+- **Mecanismo de Rotação (Play):**
+  - Loop de temporização com passos de 100ms e controle de cancelamento para evitar temporizadores duplicados ou condições de corrida.
+  - Cache de memória de velas para evitar downloads repetidos durante a rotação contínua.
+  - Preservação completa do estado do usuário (timeframe, escala LIN/LOG, indicadores ativos e seus parâmetros) ao transicionar entre símbolos.
+
+## Estado das Entregas e Fases
+
+- [x] **Fase 1 — Fundação e Primeiro Gráfico:** Seleção de contrato, timeframes, histórico real da Binance, alternância linear/logarítmica, gráficos de velas e volume.
+- [x] **Fase 2 — Ingestão e Integridade dos Dados:** Persistência SQLite WAL, ingestão de 1m, motor de agregação determinística, reconciliação independente e script CLI de auditoria (`scripts/validate_data.py`).
+- [x] **Fase 3 — Play e Rotação de Ativos:** Watchlist configurável, botões Play/Pause/Stop, intervalo configurável em segundos, preservação de contexto, cache de séries.
+- [x] **Fase 4 — Indicadores Essenciais:** SMA, EMA, Bandas de Bollinger, RSI, MACD e Volume integrados e funcionais tanto no gráfico principal quanto em painéis inferiores.
+- [x] **Fase 5 — Indicadores Complementares:** Módulos numéricos implementados no backend para VWAP, ATR, Supertrend, OBV, CCI, Williams %R, Canais de Donchian.
+- [x] **Fase 6 — Robustez, Qualidade e Colaboração:** 11 testes unitários e de integração passando, build de produção TypeScript/Vite aprovado, script de execução unificada (`start.sh`), documentação open source (`README.md`, `read.me`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`).
+
+## Resultados dos Testes
+
+1. **Testes Automatizados (pytest):**
+   - `test_aggregation.py`: Teste de agregação de 15m completa e detecção de janelas incompletas aprovados.
+   - `test_indicators.py`: Testes numéricos de SMA, EMA, RSI (comportamento de limites), Bandas de Bollinger e OBV aprovados.
+   - `test_reconciliation.py`: Testes de tolerância numérica e tratamento de zero aprovados.
+   - `test_api.py`: Testes dos endpoints `/`, `/api/watchlist`, `/api/health` aprovados.
+   - Total: 11 testes executados, 11 aprovados.
+
+2. **Auditoria de Dados Reais contra Binance Futures:**
+   - Comando executado: `validate_data.py --symbol BTCUSDT --interval 15m --from 2026-11-05T00:00:00 --to 2026-11-05T03:00:00`
+   - Resultado: 12 janelas de 15 minutos auditadas.
+   - 12 janelas aprovadas com concordância exata de OHLCV (`APPROVED: 12, DIVERGENT: 0, INCOMPLETE: 0`).
+
+3. **Compilação do Frontend:**
+   - `npm run build`: Concluído sem erros (`tsc -b && vite build` em 332ms).

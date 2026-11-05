@@ -1,0 +1,103 @@
+# REA Trading Platform — Plataforma Open Source de Análise Técnica
+
+Plataforma open source independente de análise técnica inspirada na usabilidade de gráficos profissionais, com foco inicial em contratos futuros perpétuos USDⓈ-M (Binance) via endpoints públicos e dois diferenciais fundamentais:
+
+1. **Infraestrutura Canônica de Dados e Reconciliação Independente**:
+   - Captura e persistência de candles de 1 minuto em UTC em SQLite WAL.
+   - Motor de agregação temporal determinística para 5m, 15m, 30m, 1h, 4h, 1d e 1w.
+   - Auditoria independente que compara os candles agregados internamente com os candles oficiais da exchange (status: `APPROVED`, `DIVERGENT`, `INCOMPLETE`, `PENDING`, `ERROR`).
+2. **Rotação Automática de Ativos (Play)**:
+   - Mecanismo que percorre sequencialmente uma lista de ativos configurada pelo usuário.
+   - Preserva estritamente o timeframe, escala (linear/logarítmica) e configuração de indicadores técnicos entre as trocas de ativos.
+   - Temporizador robusto com intervalo configurável em segundos e barra de progresso visual.
+
+---
+
+## Estrutura do Repositório
+
+```text
+├── backend/
+│   ├── app/
+│   │   ├── api/routes.py          # Endpoints REST (symbols, candles, sync, reconciliation, health, watchlist)
+│   │   ├── core/config.py         # Configurações gerais e tolerâncias
+│   │   ├── db/database.py         # Camada SQLite WAL e persistência canônica
+│   │   ├── engine/
+│   │   │   ├── aggregation.py     # Motor de agregação temporal UTC
+│   │   │   ├── indicators.py      # Cálculos de indicadores técnicos
+│   │   │   └── reconciliation.py  # Reconciliação independente contra a exchange
+│   │   ├── models/schemas.py      # Schemas Pydantic canônicos
+│   │   ├── providers/
+│   │   │   ├── base.py            # Contrato abstrato de provedores de mercado
+│   │   │   └── binance_futures.py # Implementação da API pública de futuros Binance
+│   │   ├── services/
+│   │   │   ├── backfill.py        # Importação e backfill histórico em lotes
+│   │   │   └── ingestion.py       # Ingestão incremental com cadência de 1 minuto
+│   │   └── main.py                # Entrada FastAPI com gerenciamento de ciclo de vida
+│   ├── scripts/
+│   │   └── validate_data.py       # CLI para auditoria e validação de consistência
+│   ├── tests/                     # Testes automatizados (pytest)
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── ChartContainer.tsx # Gráfico principal Lightweight Charts v5 e subpainéis
+│   │   │   ├── Header.tsx         # Barra superior, Play/Pause, seletor de ativos e timeframe
+│   │   │   ├── IndicatorsModal.tsx# Configuração e ativação de indicadores
+│   │   │   └── WatchlistDrawer.tsx# Gerenciamento da lista de rotação
+│   │   ├── services/api.ts        # Integração cliente com a API backend
+│   │   ├── utils/indicators.ts    # Motor de indicadores do frontend
+│   │   ├── types.ts               # Tipagens TypeScript
+│   │   ├── App.tsx                # Gerenciamento de estado e loop de rotação
+│   │   └── App.css                # Estilo escuro profissional
+│   ├── package.json
+│   └── vite.config.ts
+├── start.sh                       # Script de inicialização completa
+├── README.md                      # Documentação técnica
+├── read.me                        # Referência rápida de execução
+├── .memory                        # Registro contínuo de arquitetura e entregas
+├── CONTRIBUTING.md                # Diretrizes para colaboração
+├── SECURITY.md                    # Política de segurança
+└── LICENSE                        # Licença MIT
+```
+
+---
+
+## Como Executar
+
+### 1. Execução Simplificada
+Para iniciar tanto o backend quanto o frontend em um único comando:
+```bash
+./start.sh
+```
+- Frontend: `http://localhost:5173`
+- Backend API & Swagger: `http://127.0.0.1:8000/docs`
+
+### 2. Execução Manual dos Componentes
+
+#### Backend
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+PYTHONPATH=backend pytest backend/tests
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+#### Frontend
+```bash
+cd frontend
+npm install
+npm run build
+npm run dev
+```
+
+### 3. Execução da Auditoria Independente de Dados
+Para auditar a consistência de uma janela de tempo contra os candles oficiais da Binance:
+```bash
+.venv/bin/python backend/scripts/validate_data.py --symbol BTCUSDT --interval 15m --from 2026-11-05T00:00:00 --to 2026-11-05T03:00:00
+```
+
+---
+
+## Licença
+Distribuído sob licença [MIT](LICENSE).
