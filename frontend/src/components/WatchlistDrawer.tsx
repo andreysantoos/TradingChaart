@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, ChevronUp, ChevronDown, Trash2, Plus } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, ChevronUp, ChevronDown, Trash2, Plus, Search, RotateCcw } from 'lucide-react';
 
 interface WatchlistDrawerProps {
   isOpen: boolean;
@@ -10,6 +10,15 @@ interface WatchlistDrawerProps {
   onUpdateWatchlist: (newList: string[]) => void;
 }
 
+const TOP_20_SYMBOLS = [
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
+  'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT',
+  'NEARUSDT', 'DOTUSDT', 'LTCUSDT', 'APTUSDT', 'TRXUSDT',
+  'BCHUSDT', 'PEPEUSDT', 'SHIBUSDT', 'UNIUSDT', 'TAOUSDT'
+];
+
+const TOP_5_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
+
 export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
   isOpen,
   onClose,
@@ -19,6 +28,15 @@ export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
   onUpdateWatchlist,
 }) => {
   const [newSymbolInput, setNewSymbolInput] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
+
+  const filteredItems = useMemo(() => {
+    if (!filterQuery) return watchlist.map((sym, idx) => ({ sym, idx }));
+    const q = filterQuery.toUpperCase();
+    return watchlist
+      .map((sym, idx) => ({ sym, idx }))
+      .filter((item) => item.sym.includes(q));
+  }, [watchlist, filterQuery]);
 
   if (!isOpen) return null;
 
@@ -31,7 +49,7 @@ export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
   };
 
   const handleRemove = (symbol: string) => {
-    if (watchlist.length <= 1) return; // Keep at least one symbol
+    if (watchlist.length <= 1) return;
     onUpdateWatchlist(watchlist.filter((s) => s !== symbol));
   };
 
@@ -53,11 +71,24 @@ export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
     onUpdateWatchlist(copy);
   };
 
+  const handleLoadAll = async () => {
+    try {
+      const res = await fetch('/api/markets/symbols');
+      if (res.ok) {
+        const data = await res.json();
+        const all = data.map((s: { symbol: string }) => s.symbol);
+        onUpdateWatchlist(all);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
     <div className="drawer-overlay" onClick={onClose}>
       <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
         <div className="drawer-header">
-          <h3>Lista de Ativos para Rotação</h3>
+          <h3>Lista de Rotação ({watchlist.length})</h3>
           <button className="icon-btn" onClick={onClose}>
             <X size={18} />
           </button>
@@ -68,10 +99,24 @@ export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
             Organize a sequência que será percorrida automaticamente ao pressionar <strong>Play</strong>.
           </p>
 
+          {/* Preset Buttons */}
+          <div className="preset-buttons-row">
+            <button className="preset-btn" onClick={handleLoadAll} title="Carregar todos os 522 contratos ativos">
+              Todos (522)
+            </button>
+            <button className="preset-btn" onClick={() => onUpdateWatchlist(TOP_20_SYMBOLS)} title="Carregar Top 20">
+              Top 20
+            </button>
+            <button className="preset-btn" onClick={() => onUpdateWatchlist(TOP_5_SYMBOLS)} title="Carregar Top 5">
+              <RotateCcw size={12} /> Top 5
+            </button>
+          </div>
+
+          {/* Add custom symbol */}
           <div className="add-symbol-bar">
             <input
               type="text"
-              placeholder="Adicionar símbolo (ex: AVAXUSDT)..."
+              placeholder="Adicionar contrato (ex: SUIUSDT)..."
               value={newSymbolInput}
               onChange={(e) => setNewSymbolInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
@@ -81,8 +126,22 @@ export const WatchlistDrawer: React.FC<WatchlistDrawerProps> = ({
             </button>
           </div>
 
+          {/* Filter existing in list */}
+          {watchlist.length > 15 && (
+            <div className="filter-watchlist-bar">
+              <Search size={14} className="filter-icon" />
+              <input
+                type="text"
+                placeholder="Filtrar na lista..."
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* List items */}
           <div className="watchlist-items-list">
-            {watchlist.map((symbol, idx) => (
+            {filteredItems.map(({ sym: symbol, idx }) => (
               <div
                 key={symbol}
                 className={`watchlist-item-row ${symbol === currentSymbol ? 'current' : ''}`}
