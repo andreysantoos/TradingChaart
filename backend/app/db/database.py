@@ -165,6 +165,58 @@ def get_candles_1m(symbol: str, start_time: Optional[int] = None, end_time: Opti
         for r in rows
     ]
 
+def save_candles_agg(candles: list[dict]) -> int:
+    if not candles:
+        return 0
+    now = int(time.time() * 1000)
+    conn = get_connection()
+    with conn:
+        cursor = conn.executemany("""
+        INSERT OR REPLACE INTO candles_agg (
+            provider, market, symbol, timeframe, open_time, close_time,
+            open, high, low, close, volume, quote_volume,
+            constituent_count, is_complete, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                c.get("provider", "binance"),
+                c.get("market", "usds_m_futures"),
+                c["symbol"],
+                c["timeframe"],
+                c["open_time"],
+                c["close_time"],
+                c["open"],
+                c["high"],
+                c["low"],
+                c["close"],
+                c["volume"],
+                c.get("quote_volume", 0.0),
+                c.get("constituent_count", 1),
+                1 if c.get("is_complete", True) else 0,
+                now
+            )
+            for c in candles
+        ])
+        count = cursor.rowcount
+    conn.close()
+    return count
+
+def get_candles_agg(symbol: str, timeframe: str, start_time: Optional[int] = None, end_time: Optional[int] = None, limit: int = 1500) -> list[dict]:
+    conn = get_connection()
+    query = "SELECT * FROM candles_agg WHERE symbol = ? AND timeframe = ?"
+    params: list[object] = [symbol, timeframe]
+    if start_time is not None:
+        query += " AND open_time >= ?"
+        params.append(start_time)
+    if end_time is not None:
+        query += " AND open_time <= ?"
+        params.append(end_time)
+    query += " ORDER BY open_time ASC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 def get_latest_1m_candle_time(symbol: str) -> Optional[int]:
     conn = get_connection()
     row = conn.execute(

@@ -12,10 +12,16 @@ Plataforma open source de análise técnica do mercado financeiro, com foco inic
    - Permite ao analista configurar indicadores e timeframe uma única vez e alternar automaticamente entre os ativos de uma lista personalizada com temporizador configurável (ex: 5s, 10s, 15s).
    - Preservação estrita do contexto: timeframe, escala linear/logarítmica e configurações de indicadores são mantidos sem recriação desnecessária do gráfico.
 
+3. **Aceleração Quantitativa com Numba JIT**:
+   - Compilação nativa em código de máquina LLVM (`@njit(fastmath=True)`) para indicadores iterativos e pesados (Supertrend, ATR, EMA, RSI, Bandas de Bollinger).
+4. **Ingestão em Camadas (Top-Down)**:
+   - Estratégia dos maiores para os menores timeframes (1w e 1d primeiro, seguidos por 4h, 1h e 15m de 2025 até hoje).
+   - Histórico sub-15m (< 15m) restrito ao período recente (a partir do 2º semestre de 2026), otimizando o armazenamento em mais de 95%.
+
 ## Arquitetura e Tecnologias
 
 - **Frontend**: React 19, TypeScript, Vite, Lightweight Charts (v5), Lucide Icons.
-- **Backend / Dados**: Python 3.12, FastAPI, Uvicorn, HTTPX, SQLite em modo WAL.
+- **Backend / Dados**: Python 3.12, FastAPI, Numba, NumPy, Uvicorn, HTTPX, SQLite em modo WAL.
 - **Provedor Inicial**: Binance USDⓈ-M Futures (endpoints públicos REST, sem necessidade de chaves ou credenciais).
 
 ## Como Instalar e Executar

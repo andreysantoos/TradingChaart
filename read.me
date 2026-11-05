@@ -11,6 +11,12 @@ Plataforma open source independente de análise técnica inspirada na usabilidad
    - Preserva estritamente o timeframe, escala (linear/logarítmica) e configuração de indicadores técnicos entre as trocas de ativos.
    - Temporizador robusto com intervalo configurável em segundos e barra de progresso visual.
 
+3. **Aceleração Numérica via Numba JIT & NumPy**:
+   - Cálculos iterativos de indicadores (Supertrend, ATR, EMA, RSI, Bandas de Bollinger) compilados diretamente via LLVM (`@njit(fastmath=True)`).
+4. **Ingestão Histórica em Camadas (Top-Down)**:
+   - Priorização dos maiores timeframes para os menores (1w e 1d primeiro, seguidos por 4h, 1h e 15m).
+   - Dados de granularidade fina (< 15m) restritos ao período recente (segundo semestre de 2026 em diante), reduzindo o banco em mais de 95%.
+
 ---
 
 ## Estrutura do Repositório
@@ -60,6 +66,12 @@ Plataforma open source independente de análise técnica inspirada na usabilidad
 └── LICENSE                        # Licença MIT
 ```
 
+3. **Aceleração Numérica via Numba JIT & NumPy**:
+   - Cálculos iterativos de indicadores (Supertrend, ATR, EMA, RSI, Bandas de Bollinger) compilados diretamente via LLVM (`@njit(fastmath=True)`).
+4. **Ingestão Histórica em Camadas (Top-Down)**:
+   - Priorização dos maiores timeframes para os menores (1w e 1d primeiro, seguidos por 4h, 1h e 15m).
+   - Dados de granularidade fina (< 15m) restritos ao período recente (segundo semestre de 2026 em diante), reduzindo o banco em mais de 95%.
+
 ---
 
 ## Como Executar
@@ -96,6 +108,28 @@ Para auditar a consistência de uma janela de tempo contra os candles oficiais d
 ```bash
 .venv/bin/python backend/scripts/validate_data.py --symbol BTCUSDT --interval 15m --from 2026-11-05T00:00:00 --to 2026-11-05T03:00:00
 ```
+
+### 4. Ingestão Histórica em Camadas (Top-Down)
+Para baixar o histórico de 2025 até hoje dos maiores para os menores timeframes:
+```bash
+# Camada 1: Semanal e Diário para todos os ativos (rápido, ~1-2 minutos)
+.venv/bin/python backend/scripts/download_bulk_history.py --tier macro
+
+# Camada 2: 4h e 1h
+.venv/bin/python backend/scripts/download_bulk_history.py --tier intermediate
+
+# Camada 3: 15m (de 2025 até hoje)
+.venv/bin/python backend/scripts/download_bulk_history.py --tier intraday
+
+# Camada 4: 1m e 5m (somente a partir do 2º semestre de 2026)
+.venv/bin/python backend/scripts/download_bulk_history.py --tier recent
+```
+
+3. **Aceleração Numérica via Numba JIT & NumPy**:
+   - Cálculos iterativos de indicadores (Supertrend, ATR, EMA, RSI, Bandas de Bollinger) compilados diretamente via LLVM (`@njit(fastmath=True)`).
+4. **Ingestão Histórica em Camadas (Top-Down)**:
+   - Priorização dos maiores timeframes para os menores (1w e 1d primeiro, seguidos por 4h, 1h e 15m).
+   - Dados de granularidade fina (< 15m) restritos ao período recente (segundo semestre de 2026 em diante), reduzindo o banco em mais de 95%.
 
 ---
 

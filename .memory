@@ -81,3 +81,14 @@
   - `secret_scanning`: Ativado.
   - `secret_scanning_push_protection`: Ativado (bloqueia na tentativa de push se qualquer token for detectado).
   - `.gitignore`: Configurado para ignorar `.venv`, `.db`, `.wal`, `node_modules`, caches e logs.
+
+
+## Evolução Arquitetural — Numba JIT e Ingestão Top-Down
+- **Numba JIT (`app.engine.numba_indicators`):** Integrado para execução em código de máquina de funções numéricas de indicadores (`numba_sma`, `numba_ema`, `numba_rsi`, `numba_bollinger_bands`, `numba_atr`, `numba_supertrend`).
+- **Política de Ingestão em Camadas:**
+  - **Tier 1 (Macro):** 1w e 1d (Jan/2025 ao presente) para os 522 contratos perpétuos USDT da Binance.
+  - **Tier 2 (Intermediário):** 4h e 1h (Jan/2025 ao presente).
+  - **Tier 3 (Intraday):** 15m (Jan/2025 ao presente).
+  - **Tier 4 (Granularidade fina recente):** 1m e 5m apenas para H2 2026 em diante.
+  - Redução calculada: de ~500M de registros (~50 GB) para ~23M de registros (~2.5 GB), com download do Tier 1 realizável em menos de 2 minutos.
+- **Script de Ingestão em Massa:** `backend/scripts/download_bulk_history.py` com controle de concorrência assíncrona e commits em bloco no SQLite.
