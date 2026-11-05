@@ -101,3 +101,10 @@
 - Validação: 25 testes backend, 2 frontend e build aprovados. Lint sem erros, 3 avisos React. 1.497 candles diários fechados (ARPAUSDT/BTCUSDT/ETHUSDT) coincidiram exatamente com consultas públicas da Binance; janelas recentes atualizadas no banco local. Sem inspeção visual de navegador ou auditoria integral do banco.
 - Nenhum coletor reiniciado/interrompido. Sem processos do projeto encontrados na inspeção final disponível; iniciar com ./start.sh. Sem push.
 - Evidências e limites: DIAGNOSTICO-ARPAUSDT.md. Relatos anteriores de fases completas não substituem estes resultados ou uma auditoria integral.
+
+## Zoom horizontal semanal — 2026-11-05
+- Corrigido reset por fitContent quando o próximo ativo tem menos candles que a largura horizontal escolhida. A largura e a margem relativa ao último candle são preservadas; se o deslocamento ficar inteiramente fora do novo histórico, mostra a cauda sem substituir a preferência salva.
+- Snapshot do zoom agora é atualizado apenas por interação do usuário. Limpeza e substituição de séries são protegidas desde o início contra captura de alterações automáticas; atualizações sobrepostas não liberam prematuramente essa proteção.
+- Eventos são capturados antes dos handlers do gráfico, incluindo arrastes prolongados.
+- Validação: 6 testes frontend aprovados (4 novos para zoom); build TypeScript/Vite aprovado; lint sem erros, com os três avisos React já existentes. Sem validação visual manual em navegador. Backend e banco não alterados nesta correção.
+- Arquivos: ChartContainer.tsx, utils/horizontalZoom.ts, tests/horizontalZoom.test.mjs, package.json. Alteração local, ainda não publicada.
