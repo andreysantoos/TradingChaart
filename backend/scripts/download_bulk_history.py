@@ -24,6 +24,22 @@ BASE_URL = "https://fapi.binance.com"
 START_2025_MS = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
 START_H2_2026_MS = int(datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp() * 1000)
 
+class RateLimiter:
+    def __init__(self, requests_per_second: float = 3.0):
+        self.interval = 1.0 / requests_per_second
+        self.last_req_time = 0.0
+        self.lock = asyncio.Lock()
+
+    async def wait(self):
+        async with self.lock:
+            now = time.time()
+            elapsed = now - self.last_req_time
+            if elapsed < self.interval:
+                await asyncio.sleep(self.interval - elapsed)
+            self.last_req_time = time.time()
+
+rate_limiter = RateLimiter(requests_per_second=3.5)
+
 async def fetch_symbol_klines(
     client: httpx.AsyncClient,
     symbol: str,
@@ -31,11 +47,12 @@ async def fetch_symbol_klines(
     start_time: int,
     end_time: int
 ) -> list[dict]:
-    """Fetches klines in batches of 1500 from Binance REST API."""
+    """Fetches klines in batches of 1500 from Binance REST API with adaptive weight rate limiting."""
     all_candles = []
     current_start = start_time
     
     while current_start < end_time:
+        await rate_limiter.wait()
         params = {
             "symbol": symbol,
             "interval": interval,
@@ -43,9 +60,18 @@ async def fetch_symbol_klines(
             "endTime": end_time,
             "limit": 1500
         }
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 resp = await client.get("/fapi/v1/klines", params=params)
+                
+                # Check Binance weight usage
+                used_weight = int(resp.headers.get("x-mbx-used-weight-1m", 0))
+                if used_weight > 2000:
+                    logger.warning("Weight approaching limit: %d/2400. Cooling down for 25s...", used_weight)
+                    await asyncio.sleep(25)
+                elif used_weight > 1700:
+                    await asyncio.sleep(2)
+
                 if resp.status_code == 200:
                     data = resp.json()
                     if not data:
@@ -75,12 +101,13 @@ async def fetch_symbol_klines(
                     current_start = last_open + 1
                     break
                 elif resp.status_code == 429:
-                    wait_s = int(resp.headers.get("Retry-After", 2))
+                    wait_s = int(resp.headers.get("Retry-After", 10))
+                    logger.warning("Rate limit 429 hit. Waiting %ds...", wait_s)
                     await asyncio.sleep(wait_s)
                 else:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
             except Exception as e:
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
     return all_candles
 
 async def process_symbol_tier(
