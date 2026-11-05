@@ -8,7 +8,7 @@ import {
   CrosshairMode,
   PriceScaleMode,
 } from 'lightweight-charts';
-import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, LogicalRange, Time } from 'lightweight-charts';
 import type { Candle, IndicatorConfig } from '../types';
 import {
   computeSMA,
@@ -57,6 +57,16 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   const macdSignalRef = useRef<ISeriesApi<'Line'> | null>(null);
   const macdHistRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
+  // Zoom and pan preservation refs
+  const userInteractedRef = useRef<boolean>(false);
+  const interactionTimeoutRef = useRef<number | null>(null);
+  const hasCustomZoomRef = useRef<boolean>(false);
+  const savedZoomRef = useRef<{ span: number; offsetFromEnd: number } | null>(null);
+  const isProgrammaticUpdateRef = useRef<boolean>(false);
+  const candleCountRef = useRef<number>(0);
+  const latestCandlesRef = useRef<Candle[]>(candles);
+  const prevSymbolRef = useRef<string>(symbol);
+
   // Hover legend state
   const [legendInfo, setLegendInfo] = useState<{
     time?: string;
@@ -73,8 +83,9 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   // Initialize or re-create main chart
   useEffect(() => {
     if (!mainChartRef.current) return;
+    const chartElement = mainChartRef.current;
 
-    const chart = createChart(mainChartRef.current, {
+    const chart = createChart(chartElement, {
       layout: {
         background: { type: ColorType.Solid, color: '#131722' },
         textColor: '#d1d4dc',
@@ -89,6 +100,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       rightPriceScale: {
         borderColor: '#2b2b43',
         mode: isLogScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+        autoScale: true,
       },
       timeScale: {
         borderColor: '#2b2b43',
@@ -150,16 +162,63 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     bbMiddleRef.current = bbMiddle;
     bbLowerRef.current = bbLower;
 
+    // Track user zoom and pan interactions
+    const handleUserInteraction = () => {
+      userInteractedRef.current = true;
+      if (interactionTimeoutRef.current !== null) {
+        window.clearTimeout(interactionTimeoutRef.current);
+      }
+      interactionTimeoutRef.current = window.setTimeout(() => {
+        userInteractedRef.current = false;
+      }, 1000);
+    };
+
+    const handleLogicalRangeChange = (newRange: LogicalRange | null) => {
+      if (!newRange) return;
+      if (isProgrammaticUpdateRef.current) return;
+
+      if (userInteractedRef.current) {
+        hasCustomZoomRef.current = true;
+        const count = candleCountRef.current;
+        const span = newRange.to - newRange.from;
+        const offsetFromEnd = count > 0 ? (count - 1) - newRange.to : 0;
+        savedZoomRef.current = {
+          span,
+          offsetFromEnd,
+        };
+      }
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleLogicalRangeChange);
+
+    chartElement.addEventListener('wheel', handleUserInteraction, { passive: true });
+    chartElement.addEventListener('pointerdown', handleUserInteraction, { passive: true });
+    chartElement.addEventListener('touchstart', handleUserInteraction, { passive: true });
+
+    // Double-click to reset zoom back to full overview
+    const handleDoubleClick = () => {
+      hasCustomZoomRef.current = false;
+      savedZoomRef.current = null;
+      isProgrammaticUpdateRef.current = true;
+      chart.timeScale().fitContent();
+      chart.priceScale('right').applyOptions({ autoScale: true });
+      requestAnimationFrame(() => {
+        isProgrammaticUpdateRef.current = false;
+      });
+    };
+    chartElement.addEventListener('dblclick', handleDoubleClick);
+
     // Crosshair move listener for OHLC legend
     chart.subscribeCrosshairMove((param) => {
+      const currentCandles = latestCandlesRef.current;
       if (
         param.point === undefined ||
         !param.time ||
         param.point.x < 0 ||
         param.point.y < 0
       ) {
-        if (candles.length > 0) {
-          const last = candles[candles.length - 1];
+        if (currentCandles.length > 0) {
+          const last = currentCandles[currentCandles.length - 1];
           setLegendInfo({
             time: new Date(last.time * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
             open: last.open,
@@ -189,10 +248,10 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
 
     // Resize observer
     const handleResize = () => {
-      if (mainChartRef.current && chart) {
+      if (chartElement && chart) {
         chart.applyOptions({
-          width: mainChartRef.current.clientWidth,
-          height: mainChartRef.current.clientHeight,
+          width: chartElement.clientWidth,
+          height: chartElement.clientHeight,
         });
       }
     };
@@ -200,6 +259,14 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (interactionTimeoutRef.current !== null) {
+        window.clearTimeout(interactionTimeoutRef.current);
+      }
+      chartElement.removeEventListener('wheel', handleUserInteraction);
+      chartElement.removeEventListener('pointerdown', handleUserInteraction);
+      chartElement.removeEventListener('touchstart', handleUserInteraction);
+      chartElement.removeEventListener('dblclick', handleDoubleClick);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleLogicalRangeChange);
       chart.remove();
       mainChartApi.current = null;
     };
@@ -210,6 +277,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     if (mainChartApi.current) {
       mainChartApi.current.priceScale('right').applyOptions({
         mode: isLogScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+        autoScale: true,
       });
     }
   }, [isLogScale]);
@@ -284,7 +352,23 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
 
   // Synchronize candles & indicator data
   useEffect(() => {
-    if (!candles || candles.length === 0 || !candleSeriesRef.current) return;
+    if (!candles || candles.length === 0 || !candleSeriesRef.current || !mainChartApi.current) return;
+
+    latestCandlesRef.current = candles;
+    prevSymbolRef.current = symbol;
+
+    // Capture latest visible range before applying new data if user has customized zoom
+    if (hasCustomZoomRef.current) {
+      const currentLogicalRange = mainChartApi.current.timeScale().getVisibleLogicalRange();
+      if (currentLogicalRange && candleCountRef.current > 0) {
+        const span = currentLogicalRange.to - currentLogicalRange.from;
+        const offsetFromEnd = (candleCountRef.current - 1) - currentLogicalRange.to;
+        savedZoomRef.current = {
+          span,
+          offsetFromEnd,
+        };
+      }
+    }
 
     // 1. Candlestick Data
     const formattedCandles = candles.map((c) => ({
@@ -295,6 +379,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       close: c.close,
     }));
     candleSeriesRef.current.setData(formattedCandles);
+    candleCountRef.current = candles.length;
 
     // 2. Volume Data
     if (volumeSeriesRef.current) {
@@ -366,8 +451,47 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       macdHistRef.current.setData(macdData.hist);
     }
 
-    // Fit content smoothly on symbol change
-    mainChartApi.current?.timeScale().fitContent();
+    // Horizontal zoom and vertical price scale handling
+    const newCount = candles.length;
+    isProgrammaticUpdateRef.current = true;
+
+    if (hasCustomZoomRef.current && savedZoomRef.current && savedZoomRef.current.span > 0) {
+      const { span, offsetFromEnd } = savedZoomRef.current;
+
+      if (span >= newCount) {
+        mainChartApi.current.timeScale().fitContent();
+      } else {
+        let targetTo = (newCount - 1) - offsetFromEnd;
+        let targetFrom = targetTo - span;
+
+        // Ensure range intersects valid data bars so candles are always visible
+        if (targetTo <= 0 || targetFrom >= newCount) {
+          targetTo = newCount;
+          targetFrom = Math.max(0, newCount - span);
+        }
+
+        mainChartApi.current.timeScale().setVisibleLogicalRange({
+          from: targetFrom,
+          to: targetTo,
+        });
+      }
+    } else {
+      mainChartApi.current.timeScale().fitContent();
+    }
+
+    // Ensure price scale automatically recalculates vertical bounds for new asset
+    mainChartApi.current.priceScale('right').applyOptions({
+      autoScale: true,
+    });
+
+    requestAnimationFrame(() => {
+      mainChartApi.current?.priceScale('right').applyOptions({
+        autoScale: true,
+      });
+      requestAnimationFrame(() => {
+        isProgrammaticUpdateRef.current = false;
+      });
+    });
 
     // Default hover info to latest candle
     const last = candles[candles.length - 1];
@@ -379,7 +503,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       close: last.close,
       volume: last.volume,
     });
-  }, [candles, indicators]);
+  }, [candles, indicators, symbol]);
 
   return (
     <div className="chart-view-wrapper">
