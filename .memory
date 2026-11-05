@@ -92,3 +92,12 @@
   - **Tier 4 (Granularidade fina recente):** 1m e 5m apenas para H2 2026 em diante.
   - Redução calculada: de ~500M de registros (~50 GB) para ~23M de registros (~2.5 GB), com download do Tier 1 realizável em menos de 2 minutos.
 - **Script de Ingestão em Massa:** `backend/scripts/download_bulk_history.py` com controle de concorrência assíncrona e commits em bloco no SQLite.
+
+## Correção ARPAUSDT — 2026-11-05
+- Corrigida consulta que selecionava candles antigos em vez da página recente.
+- Gráfico usa candles oficiais do timeframe solicitado, persistidos pelo backend com cache de 60s; não depende de agregação parcial de 1m. Agregação/reconciliação canônicas continuam separadas.
+- Interface atualiza periodicamente, cancela seleção anterior, mostra falha e candle provisório, e usa precisão do instrumento. Refresh não força autoscale vertical.
+- Importações históricas excluem candles abertos e revisitam a cauda na retomada. Provider usa instante de início da consulta para determinar fechamento.
+- Validação: 25 testes backend, 2 frontend e build aprovados. Lint sem erros, 3 avisos React. 1.497 candles diários fechados (ARPAUSDT/BTCUSDT/ETHUSDT) coincidiram exatamente com consultas públicas da Binance; janelas recentes atualizadas no banco local. Sem inspeção visual de navegador ou auditoria integral do banco.
+- Nenhum coletor reiniciado/interrompido. Sem processos do projeto encontrados na inspeção final disponível; iniciar com ./start.sh. Sem push.
+- Evidências e limites: DIAGNOSTICO-ARPAUSDT.md. Relatos anteriores de fases completas não substituem estes resultados ou uma auditoria integral.

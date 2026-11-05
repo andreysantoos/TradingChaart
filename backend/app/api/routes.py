@@ -1,24 +1,22 @@
 import time
 from typing import Optional
-from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.models.schemas import Timeframe, SymbolInfo, HealthStatus, ValidationStatus
+from app.models.schemas import Timeframe, SymbolInfo, HealthStatus
 from app.providers.binance_futures import binance_provider
 from app.db.database import (
     get_candles_1m,
     get_candles_agg,
-    save_candles_agg,
-    get_latest_1m_candle_time,
     get_reconciliations,
     get_stats,
     get_connection
 )
-from app.engine.aggregation import aggregate_candles, TIMEFRAME_MINUTES
 from app.engine.reconciliation import reconcile_window
 from app.services.backfill import backfill_symbol_history
 from app.services.ingestion import ingestion_service
+from app.services.chart_data import chart_data_service
 
 router = APIRouter()
 
@@ -44,84 +42,34 @@ async def get_candles(
     limit: int = Query(500, ge=10, le=1500),
     start_time: Optional[int] = None,
     end_time: Optional[int] = None,
-    auto_backfill: bool = Query(True, description="Fetch from exchange if DB is empty")
+    auto_backfill: bool = Query(True, description="Refresh official candles in the backend (60s cache); false reads local data only")
 ):
     symbol = symbol.upper()
     tf_val = timeframe.value
-    expected_minutes = TIMEFRAME_MINUTES.get(tf_val, 1)
+    # Imported higher timeframes are official candles, maintained independently
+    # from canonical 1m ingestion. Never build a daily candle from partial history.
+    if auto_backfill:
+        try:
+            await chart_data_service.refresh(symbol, tf_val, limit, start_time, end_time)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Não foi possível atualizar os candles na Binance. Tente novamente.") from exc
 
-    # 1. If timeframe is not 1m, check if we already have direct stored/backfilled aggregated candles
-    if tf_val != "1m":
-        direct_aggs = get_candles_agg(symbol=symbol, timeframe=tf_val, start_time=start_time, end_time=end_time, limit=limit)
-        if len(direct_aggs) >= min(limit, 50):
-            result = [
-                {
-                    "time": a["open_time"] // 1000,
-                    "open": a["open"],
-                    "high": a["high"],
-                    "low": a["low"],
-                    "close": a["close"],
-                    "volume": a["volume"],
-                    "quote_volume": a.get("quote_volume", 0.0),
-                    "is_complete": bool(a.get("is_complete", 1)),
-                    "constituent_count": a.get("constituent_count", 1)
-                }
-                for a in direct_aggs[-limit:]
-            ]
-            return {
-                "symbol": symbol,
-                "timeframe": tf_val,
-                "count": len(result),
-                "candles": result
-            }
-
-    # 2. Check local 1m candles
-    candles_1m = get_candles_1m(symbol=symbol, start_time=start_time, end_time=end_time, limit=limit * expected_minutes)
-    
-    # 3. If DB has too few candles and auto_backfill is requested, backfill from exchange
-    if len(candles_1m) < min(limit * expected_minutes, 100) and auto_backfill:
-        await backfill_symbol_history(symbol=symbol, limit=1500, end_time=end_ms if 'end_ms' in locals() else end_time)
-        ingestion_service.add_symbol(symbol)
-        candles_1m = get_candles_1m(symbol=symbol, start_time=start_time, end_time=end_time, limit=limit * expected_minutes)
-
-    # 4. Aggregate if timeframe > 1m
+    now_ms = int(time.time() * 1000)
     if tf_val == "1m":
-        result = [
-            {
-                "time": c.open_time // 1000,
-                "open": c.open,
-                "high": c.high,
-                "low": c.low,
-                "close": c.close,
-                "volume": c.volume,
-                "quote_volume": c.quote_volume
-            }
-            for c in candles_1m[-limit:]
-        ]
+        rows = [c.model_dump() for c in get_candles_1m(
+            symbol, start_time=start_time, end_time=end_time, limit=limit
+        )]
     else:
-        # Aggregate candles
-        aggregated = aggregate_candles(candles_1m, tf_val, require_full_window=False)
-        result = [
-            {
-                "time": a.open_time // 1000,
-                "open": a.open,
-                "high": a.high,
-                "low": a.low,
-                "close": a.close,
-                "volume": a.volume,
-                "quote_volume": a.quote_volume,
-                "is_complete": a.is_complete,
-                "constituent_count": a.constituent_count
-            }
-            for a in aggregated[-limit:]
-        ]
+        rows = get_candles_agg(symbol, tf_val, start_time=start_time, end_time=end_time, limit=limit)
 
-    return {
-        "symbol": symbol,
-        "timeframe": tf_val,
-        "count": len(result),
-        "candles": result
-    }
+    result = [{
+        "time": r["open_time"] // 1000,
+        "open": r["open"], "high": r["high"], "low": r["low"],
+        "close": r["close"], "volume": r["volume"],
+        "quote_volume": r.get("quote_volume", 0.0),
+        "is_complete": bool(r.get("is_complete", r.get("is_closed", False))) and r["close_time"] < now_ms,
+    } for r in rows]
+    return {"symbol": symbol, "timeframe": tf_val, "count": len(result), "candles": result}
 
 class SyncRequest(BaseModel):
     symbol: str

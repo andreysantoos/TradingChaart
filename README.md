@@ -18,6 +18,24 @@ Plataforma open source de análise técnica do mercado financeiro, com foco inic
    - Estratégia dos maiores para os menores timeframes (1w e 1d primeiro, seguidos por 4h, 1h e 15m de 2025 até hoje).
    - Histórico sub-15m (< 15m) restrito ao período recente (a partir do 2º semestre de 2026), otimizando o armazenamento em mais de 95%.
 
+## Atualização e integridade do gráfico
+
+O gráfico consulta candles oficiais de preço negociado da Binance USDⓈ-M
+no timeframe selecionado. O backend persiste a janela solicitada e usa cache
+de 60 segundos; a interface atualiza a cada minuto, sem depender da conclusão
+do download histórico. Os candles maiores exibidos são oficiais, não agregações
+parciais de 1m. O motor de agregação e sua reconciliação permanecem disponíveis
+separadamente para auditoria da base canônica.
+
+O candle atual é provisório e identificado como “em formação”. Importações
+históricas armazenam apenas candles fechados e revisitam o último registro
+na retomada. Falhas de atualização são exibidas na interface. O gráfico usa
+os 500 candles mais recentes, em ordem cronológica, e preços com a precisão
+do instrumento. A atualização é por polling, não por transmissão em tempo real.
+
+Testes da atualização da interface (Node 22.6+): `cd frontend && npm test`.
+Detalhes da correção e validação: [DIAGNOSTICO-ARPAUSDT.md](DIAGNOSTICO-ARPAUSDT.md).
+
 ## Arquitetura e Tecnologias
 
 - **Frontend**: React 19, TypeScript, Vite, Lightweight Charts (v5), Lucide Icons.

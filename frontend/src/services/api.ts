@@ -11,7 +11,8 @@ export async function getSymbols(): Promise<SymbolInfo[]> {
 export async function getCandles(
   symbol: string,
   timeframe: Timeframe,
-  limit = 500
+  limit = 500,
+  signal?: AbortSignal
 ): Promise<Candle[]> {
   const params = new URLSearchParams({
     symbol,
@@ -19,7 +20,7 @@ export async function getCandles(
     limit: limit.toString(),
     auto_backfill: 'true',
   });
-  const res = await fetch(`${API_BASE}/candles?${params.toString()}`);
+  const res = await fetch(`${API_BASE}/candles?${params.toString()}`, { signal });
   if (!res.ok) throw new Error(`Failed to fetch candles: ${res.statusText}`);
   const data = await res.json();
   return data.candles;

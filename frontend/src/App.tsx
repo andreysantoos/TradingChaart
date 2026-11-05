@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { Header } from './components/Header';
 import { ChartContainer } from './components/ChartContainer';
 import { WatchlistDrawer } from './components/WatchlistDrawer';
@@ -6,6 +6,7 @@ import { IndicatorsModal } from './components/IndicatorsModal';
 import type { Candle, HealthData, IndicatorConfig, SymbolInfo, Timeframe } from './types';
 import { getCandles, getHealth, getSymbols, getWatchlist, saveWatchlist } from './services/api';
 import './App.css';
+import { pollCandles } from './services/pollCandles';
 
 const DEFAULT_INDICATORS: IndicatorConfig[] = [
   {
@@ -73,7 +74,10 @@ export function App() {
   const [indicators, setIndicators] = useState<IndicatorConfig[]>(DEFAULT_INDICATORS);
 
   // Candles & Loading
-  const [candles, setCandles] = useState<Candle[]>([]);
+  const [candleResult, setCandleResult] = useState<{ key: string; data: Candle[] }>({ key: '', data: [] });
+  const selectionKey = `${currentSymbol}_${timeframe}`;
+  const candles = candleResult.key === selectionKey ? candleResult.data : [];
+  const [candleError, setCandleError] = useState<{ key: string; message: string } | null>(null);
   const [isLoadingCandles, setIsLoadingCandles] = useState<boolean>(false);
 
   // Modals & Drawers
@@ -82,9 +86,6 @@ export function App() {
 
   // Health
   const [health, setHealth] = useState<HealthData | null>(null);
-
-  // Memory Cache for smooth rotation without re-requesting if fresh
-  const candlesCache = useRef<Map<string, { candles: Candle[]; ts: number }>>(new Map());
 
   // Initial load: symbols, default watchlist, health
   useEffect(() => {
@@ -106,35 +107,19 @@ export function App() {
     return () => clearInterval(healthInterval);
   }, []);
 
-  // Fetch candles when symbol or timeframe changes
-  const loadCandles = useCallback(
-    async (sym: string, tf: Timeframe) => {
-      const cacheKey = `${sym}_${tf}`;
-      const cached = candlesCache.current.get(cacheKey);
-      const now = Date.now();
-
-      if (cached && now - cached.ts < 30000) {
-        setCandles(cached.candles);
-        return;
-      }
-
-      setIsLoadingCandles(true);
-      try {
-        const data = await getCandles(sym, tf, 500);
-        setCandles(data);
-        candlesCache.current.set(cacheKey, { candles: data, ts: Date.now() });
-      } catch (err) {
-        console.error('Failed to load candles:', err);
-      } finally {
-        setIsLoadingCandles(false);
-      }
-    },
-    []
-  );
-
+  // Refresh even while the user stays on the same asset. Cleanup aborts the
+  // previous selection and prevents late responses from replacing its successor.
   useEffect(() => {
-    loadCandles(currentSymbol, timeframe);
-  }, [currentSymbol, timeframe, loadCandles]);
+    return pollCandles({
+      fetch: (signal) => getCandles(currentSymbol, timeframe, 500, signal),
+      onData: (data) => {
+        setCandleResult({ key: selectionKey, data });
+        setCandleError(null);
+      },
+      onError: () => setCandleError({ key: selectionKey, message: 'Falha ao atualizar os dados. O gráfico pode estar desatualizado; nova tentativa em 1 minuto.' }),
+      onLoading: setIsLoadingCandles,
+    });
+  }, [currentSymbol, timeframe, selectionKey]);
 
   // Robust Auto-Rotation Loop
   useEffect(() => {
@@ -232,6 +217,7 @@ export function App() {
       />
 
       <main className="main-content">
+        {candleError?.key === selectionKey && <div role="alert">{candleError.message}</div>}
         <ChartContainer
           symbol={currentSymbol}
           timeframe={timeframe}
@@ -239,6 +225,7 @@ export function App() {
           isLogScale={isLogScale}
           indicators={indicators}
           isLoading={isLoadingCandles}
+          pricePrecision={symbols.find((s) => s.symbol === currentSymbol)?.price_precision ?? 8}
         />
       </main>
 
