@@ -10,6 +10,7 @@ import {
 } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, LogicalRange, Time } from 'lightweight-charts';
 import type { Candle, IndicatorConfig } from '../types';
+import { captureHorizontalZoom, restoreHorizontalZoom } from '../utils/horizontalZoom';
 import {
   computeSMA,
   computeEMA,
@@ -65,6 +66,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   const hasCustomZoomRef = useRef<boolean>(false);
   const savedZoomRef = useRef<{ span: number; offsetFromEnd: number } | null>(null);
   const isProgrammaticUpdateRef = useRef<boolean>(false);
+  const updateSequenceRef = useRef(0);
   const candleCountRef = useRef<number>(0);
   const latestCandlesRef = useRef<Candle[]>(candles);
   const prevSymbolRef = useRef<string>(symbol);
@@ -165,7 +167,8 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     bbLowerRef.current = bbLower;
 
     // Track user zoom and pan interactions
-    const handleUserInteraction = () => {
+    const handleUserInteraction = (event: Event) => {
+      if (event.type === 'pointermove' && !(event as PointerEvent).buttons) return;
       userInteractedRef.current = true;
       if (interactionTimeoutRef.current !== null) {
         window.clearTimeout(interactionTimeoutRef.current);
@@ -179,33 +182,32 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       if (!newRange) return;
       if (isProgrammaticUpdateRef.current) return;
 
-      if (userInteractedRef.current) {
-        hasCustomZoomRef.current = true;
-        const count = candleCountRef.current;
-        const span = newRange.to - newRange.from;
-        const offsetFromEnd = count > 0 ? (count - 1) - newRange.to : 0;
-        savedZoomRef.current = {
-          span,
-          offsetFromEnd,
-        };
+      if (userInteractedRef.current && latestCandlesRef.current.length > 0) {
+        const zoom = captureHorizontalZoom(newRange, candleCountRef.current);
+        if (zoom) {
+          hasCustomZoomRef.current = true;
+          savedZoomRef.current = zoom;
+        }
       }
     };
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleLogicalRangeChange);
 
-    chartElement.addEventListener('wheel', handleUserInteraction, { passive: true });
-    chartElement.addEventListener('pointerdown', handleUserInteraction, { passive: true });
-    chartElement.addEventListener('touchstart', handleUserInteraction, { passive: true });
+    chartElement.addEventListener('wheel', handleUserInteraction, { passive: true, capture: true });
+    chartElement.addEventListener('pointerdown', handleUserInteraction, { passive: true, capture: true });
+    chartElement.addEventListener('pointermove', handleUserInteraction, { passive: true, capture: true });
+    chartElement.addEventListener('touchstart', handleUserInteraction, { passive: true, capture: true });
 
     // Double-click to reset zoom back to full overview
     const handleDoubleClick = () => {
       hasCustomZoomRef.current = false;
       savedZoomRef.current = null;
       isProgrammaticUpdateRef.current = true;
+      const updateId = ++updateSequenceRef.current;
       chart.timeScale().fitContent();
       chart.priceScale('right').applyOptions({ autoScale: true });
       requestAnimationFrame(() => {
-        isProgrammaticUpdateRef.current = false;
+        if (updateSequenceRef.current === updateId) isProgrammaticUpdateRef.current = false;
       });
     };
     chartElement.addEventListener('dblclick', handleDoubleClick);
@@ -264,9 +266,10 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       if (interactionTimeoutRef.current !== null) {
         window.clearTimeout(interactionTimeoutRef.current);
       }
-      chartElement.removeEventListener('wheel', handleUserInteraction);
-      chartElement.removeEventListener('pointerdown', handleUserInteraction);
-      chartElement.removeEventListener('touchstart', handleUserInteraction);
+      chartElement.removeEventListener('wheel', handleUserInteraction, true);
+      chartElement.removeEventListener('pointerdown', handleUserInteraction, true);
+      chartElement.removeEventListener('pointermove', handleUserInteraction, true);
+      chartElement.removeEventListener('touchstart', handleUserInteraction, true);
       chartElement.removeEventListener('dblclick', handleDoubleClick);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleLogicalRangeChange);
       chart.remove();
@@ -355,6 +358,12 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   // Synchronize candles & indicator data
   useEffect(() => {
     if (!candleSeriesRef.current || !mainChartApi.current) return;
+    // Guard before clearing or replacing any series: both change the time scale.
+    isProgrammaticUpdateRef.current = true;
+    const updateId = ++updateSequenceRef.current;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (updateSequenceRef.current === updateId) isProgrammaticUpdateRef.current = false;
+    }));
     if (candles.length === 0) {
       for (const series of [candleSeriesRef, volumeSeriesRef, smaSeriesRef, emaSeriesRef,
         bbUpperRef, bbMiddleRef, bbLowerRef, rsiSeriesRef, macdLineRef, macdSignalRef, macdHistRef]) {
@@ -372,18 +381,8 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     latestCandlesRef.current = candles;
     prevSymbolRef.current = `${symbol}_${timeframe}`;
 
-    // Capture latest visible range before applying new data if user has customized zoom
-    if (hasCustomZoomRef.current) {
-      const currentLogicalRange = mainChartApi.current.timeScale().getVisibleLogicalRange();
-      if (currentLogicalRange && candleCountRef.current > 0) {
-        const span = currentLogicalRange.to - currentLogicalRange.from;
-        const offsetFromEnd = (candleCountRef.current - 1) - currentLogicalRange.to;
-        savedZoomRef.current = {
-          span,
-          offsetFromEnd,
-        };
-      }
-    }
+    // Only actual user interactions update savedZoomRef. Reading the range here
+    // would capture the temporary/clamped viewport from a previous asset.
 
     // 1. Candlestick Data
     const formattedCandles = candles.map((c) => ({
@@ -466,30 +465,12 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       macdHistRef.current.setData(macdData.hist);
     }
 
-    // Horizontal zoom and vertical price scale handling
-    const newCount = candles.length;
-    isProgrammaticUpdateRef.current = true;
-
-    if (hasCustomZoomRef.current && savedZoomRef.current && savedZoomRef.current.span > 0) {
-      const { span, offsetFromEnd } = savedZoomRef.current;
-
-      if (span >= newCount) {
-        mainChartApi.current.timeScale().fitContent();
-      } else {
-        let targetTo = (newCount - 1) - offsetFromEnd;
-        let targetFrom = targetTo - span;
-
-        // Ensure range intersects valid data bars so candles are always visible
-        if (targetTo <= 0 || targetFrom >= newCount) {
-          targetTo = newCount;
-          targetFrom = Math.max(0, newCount - span);
-        }
-
-        mainChartApi.current.timeScale().setVisibleLogicalRange({
-          from: targetFrom,
-          to: targetTo,
-        });
-      }
+    // Keep the user's horizontal span even if this asset has fewer candles.
+    const targetRange = hasCustomZoomRef.current && savedZoomRef.current
+      ? restoreHorizontalZoom(savedZoomRef.current, candles.length)
+      : null;
+    if (targetRange) {
+      mainChartApi.current.timeScale().setVisibleLogicalRange(targetRange as LogicalRange);
     } else {
       mainChartApi.current.timeScale().fitContent();
     }
@@ -502,9 +483,6 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     requestAnimationFrame(() => {
       if (selectionChanged) mainChartApi.current?.priceScale('right').applyOptions({
         autoScale: true,
-      });
-      requestAnimationFrame(() => {
-        isProgrammaticUpdateRef.current = false;
       });
     });
 
