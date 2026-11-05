@@ -24,6 +24,14 @@ echo "Iniciando frontend Vite (porta 5173)..."
 cd frontend && npm run dev &
 FRONTEND_PID=$!
 
-trap "echo 'Encerrando serviços...'; kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true" EXIT INT TERM
+# Optional background bulk sync
+SYNC_PID=""
+if [ "$1" = "--sync" ] || [ "$1" = "--ingest" ]; then
+    echo "Opção --sync detectada: Iniciando sincronização histórica em segundo plano..."
+    .venv/bin/python backend/scripts/download_bulk_history.py --tier intermediate &
+    SYNC_PID=$!
+fi
+
+trap "echo 'Encerrando serviços...'; kill $BACKEND_PID $FRONTEND_PID $SYNC_PID 2>/dev/null || true" EXIT INT TERM
 
 wait
