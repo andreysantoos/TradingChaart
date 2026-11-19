@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   createChart,
+  createTextWatermark,
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
@@ -39,12 +40,8 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   pricePrecision,
 }) => {
   const mainChartRef = useRef<HTMLDivElement>(null);
-  const rsiChartRef = useRef<HTMLDivElement>(null);
-  const macdChartRef = useRef<HTMLDivElement>(null);
 
   const mainChartApi = useRef<IChartApi | null>(null);
-  const rsiChartApi = useRef<IChartApi | null>(null);
-  const macdChartApi = useRef<IChartApi | null>(null);
 
   // Series refs
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -81,8 +78,15 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     volume?: number;
   }>({});
 
-  const isRsiEnabled = indicators.find((i) => i.id === 'rsi')?.enabled;
-  const isMacdEnabled = indicators.find((i) => i.id === 'macd')?.enabled;
+  const rsi = indicators.find((i) => i.id === 'rsi');
+  const macd = indicators.find((i) => i.id === 'macd');
+  const rsiPeriod = Number(rsi?.params.period || 14);
+  const macdWarmup = Math.max(Number(macd?.params.fast || 12), Number(macd?.params.slow || 26))
+    + Number(macd?.params.signal || 9) - 1;
+  const rsiLabel = rsi?.enabled ? `RSI (${rsiPeriod})` : null;
+  const macdLabel = macd?.enabled
+    ? `MACD (${macd.params.fast || 12}, ${macd.params.slow || 26}, ${macd.params.signal || 9})`
+    : null;
 
   // Initialize or re-create main chart
   useEffect(() => {
@@ -90,6 +94,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     const chartElement = mainChartRef.current;
 
     const chart = createChart(chartElement, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: '#131722' },
         textColor: '#d1d4dc',
@@ -103,7 +108,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       },
       rightPriceScale: {
         borderColor: '#2b2b43',
-        mode: isLogScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+        mode: PriceScaleMode.Normal,
         autoScale: true,
       },
       timeScale: {
@@ -157,6 +162,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       lineWidth: 1,
     });
 
+    chart.panes()[0].setStretchFactor(3);
     mainChartApi.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
@@ -250,19 +256,7 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
       }
     });
 
-    // Resize observer
-    const handleResize = () => {
-      if (chartElement && chart) {
-        chart.applyOptions({
-          width: chartElement.clientWidth,
-          height: chartElement.clientHeight,
-        });
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
     return () => {
-      window.removeEventListener('resize', handleResize);
       if (interactionTimeoutRef.current !== null) {
         window.clearTimeout(interactionTimeoutRef.current);
       }
@@ -287,73 +281,53 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     }
   }, [isLogScale]);
 
-  // RSI Chart Lifecycle
+  // Native panes share the candle time axis and keep independent value scales.
   useEffect(() => {
-    if (!isRsiEnabled || !rsiChartRef.current) {
-      if (rsiChartApi.current) {
-        rsiChartApi.current.remove();
-        rsiChartApi.current = null;
-      }
-      return;
-    }
-
-    const rChart = createChart(rsiChartRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: '#131722' },
-        textColor: '#d1d4dc',
-      },
-      grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
-      rightPriceScale: { borderColor: '#2b2b43' },
-      timeScale: { visible: false },
+    const chart = mainChartApi.current;
+    if (!chart || !rsiLabel) return;
+    const pane = chart.addPane();
+    const line = pane.addSeries(LineSeries, { color: '#e91e63', lineWidth: 2 });
+    if (pane.paneIndex() !== 1) pane.moveTo(1);
+    pane.setStretchFactor(1);
+    const label = createTextWatermark(pane, {
+      horzAlign: 'left', vertAlign: 'top',
+      lines: [{ text: rsiLabel, color: '#aeb4c0', fontSize: 12 }],
     });
-
-    const rSeries = rChart.addSeries(LineSeries, {
-      color: '#e91e63',
-      lineWidth: 2,
-    });
-    rsiChartApi.current = rChart;
-    rsiSeriesRef.current = rSeries;
-
+    rsiSeriesRef.current = line;
     return () => {
-      rChart.remove();
-      rsiChartApi.current = null;
+      rsiSeriesRef.current = null;
+      if (mainChartApi.current !== chart) return;
+      label.detach();
+      chart.removeSeries(line);
     };
-  }, [isRsiEnabled]);
+  }, [rsiLabel]);
 
-  // MACD Chart Lifecycle
   useEffect(() => {
-    if (!isMacdEnabled || !macdChartRef.current) {
-      if (macdChartApi.current) {
-        macdChartApi.current.remove();
-        macdChartApi.current = null;
-      }
-      return;
-    }
-
-    const mChart = createChart(macdChartRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: '#131722' },
-        textColor: '#d1d4dc',
-      },
-      grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
-      rightPriceScale: { borderColor: '#2b2b43' },
-      timeScale: { visible: false },
+    const chart = mainChartApi.current;
+    if (!chart || !macdLabel) return;
+    const pane = chart.addPane();
+    const histogram = pane.addSeries(HistogramSeries);
+    const line = pane.addSeries(LineSeries, { color: '#2962ff', lineWidth: 2 });
+    const signal = pane.addSeries(LineSeries, { color: '#ff6d00', lineWidth: 1 });
+    pane.setStretchFactor(1);
+    const label = createTextWatermark(pane, {
+      horzAlign: 'left', vertAlign: 'top',
+      lines: [{ text: macdLabel, color: '#aeb4c0', fontSize: 12 }],
     });
-
-    const mLine = mChart.addSeries(LineSeries, { color: '#2962ff', lineWidth: 2 });
-    const mSignal = mChart.addSeries(LineSeries, { color: '#ff6d00', lineWidth: 1 });
-    const mHist = mChart.addSeries(HistogramSeries, {});
-
-    macdChartApi.current = mChart;
-    macdLineRef.current = mLine;
-    macdSignalRef.current = mSignal;
-    macdHistRef.current = mHist;
-
+    macdLineRef.current = line;
+    macdSignalRef.current = signal;
+    macdHistRef.current = histogram;
     return () => {
-      mChart.remove();
-      macdChartApi.current = null;
+      macdLineRef.current = null;
+      macdSignalRef.current = null;
+      macdHistRef.current = null;
+      if (mainChartApi.current !== chart) return;
+      label.detach();
+      chart.removeSeries(histogram);
+      chart.removeSeries(line);
+      chart.removeSeries(signal);
     };
-  }, [isMacdEnabled]);
+  }, [macdLabel]);
 
   // Synchronize candles & indicator data
   useEffect(() => {
@@ -374,7 +348,8 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
     }
     const selectionChanged = prevSymbolRef.current !== `${symbol}_${timeframe}`;
     const priceFormat = { type: 'price' as const, precision: pricePrecision, minMove: 10 ** -pricePrecision };
-    for (const series of [candleSeriesRef, smaSeriesRef, emaSeriesRef, bbUpperRef, bbMiddleRef, bbLowerRef]) {
+    for (const series of [candleSeriesRef, smaSeriesRef, emaSeriesRef, bbUpperRef, bbMiddleRef, bbLowerRef,
+      macdLineRef, macdSignalRef, macdHistRef]) {
       series.current?.applyOptions({ priceFormat });
     }
 
@@ -521,33 +496,16 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
         {candles.length > 0 && candles[candles.length - 1].is_complete === false && (
           <span className="loading-tag">Último candle em formação</span>
         )}
+        {rsi?.enabled && candles.length > 0 && candles.length <= rsiPeriod && (
+          <span className="loading-tag">RSI requer {rsiPeriod + 1} candles</span>
+        )}
+        {macd?.enabled && candles.length > 0 && candles.length < macdWarmup && (
+          <span className="loading-tag">Sinal do MACD requer {macdWarmup} candles</span>
+        )}
         {isLoading && <span className="loading-tag">Carregando dados...</span>}
       </div>
 
-      {/* Main Chart Canvas */}
-      <div
-        ref={mainChartRef}
-        className="main-chart-canvas"
-        style={{
-          flex: isRsiEnabled || isMacdEnabled ? '1 1 65%' : '1 1 100%',
-        }}
-      />
-
-      {/* Secondary RSI Panel */}
-      {isRsiEnabled && (
-        <div className="sub-panel">
-          <div className="sub-panel-title">RSI (14)</div>
-          <div ref={rsiChartRef} className="sub-chart-canvas" />
-        </div>
-      )}
-
-      {/* Secondary MACD Panel */}
-      {isMacdEnabled && (
-        <div className="sub-panel">
-          <div className="sub-panel-title">MACD (12, 26, 9)</div>
-          <div ref={macdChartRef} className="sub-chart-canvas" />
-        </div>
-      )}
+      <div ref={mainChartRef} className="main-chart-canvas" />
     </div>
   );
 };
