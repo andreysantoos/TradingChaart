@@ -67,13 +67,16 @@ export const IndicatorsModal: React.FC<IndicatorsModalProps> = ({
                         <label>{key.toUpperCase()}:</label>
                         <input
                           type="number"
+                          min={key === 'stdDev' ? undefined : 1}
+                          step={key === 'stdDev' ? 'any' : 1}
                           value={val}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            if (key !== 'stdDev' && !e.target.validity.valid) return;
                             onUpdateParams(ind.id, {
                               ...ind.params,
-                              [key]: parseFloat(e.target.value) || 0,
-                            })
-                          }
+                              [key]: e.target.value === '' ? '' : e.target.valueAsNumber,
+                            });
+                          }}
                         />
                       </div>
                     ))}
