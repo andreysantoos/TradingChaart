@@ -403,9 +403,17 @@ body {
 }
 
 .legend-symbol-block {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: baseline;
-  gap: 6px;
+  gap: 2px 6px;
+}
+
+.legend-change {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .legend-symbol {
@@ -428,11 +436,11 @@ body {
   color: var(--text-secondary);
 }
 
-.legend-values strong.up {
+.chart-header-legend strong.up {
   color: var(--color-up);
 }
 
-.legend-values strong.down {
+.chart-header-legend strong.down {
   color: var(--color-down);
 }
 

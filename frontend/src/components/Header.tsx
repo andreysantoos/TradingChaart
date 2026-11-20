@@ -61,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand & Symbol Selector */}
         <div className="header-section">
           <div className="brand-logo">
-            <span className="brand-title">REA</span>
+            <span className="brand-title">TrandingChaart</span>
             <span className="brand-badge">TERMINAL</span>
           </div>
 

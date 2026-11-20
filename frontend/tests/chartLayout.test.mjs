@@ -24,6 +24,7 @@ test('windowed chart keeps both scales and draws RSI and MACD through selection 
     return route.fulfill({ json });
   });
   await page.goto(server.resolvedUrls.local[0]);
+  assert.equal(await page.locator('.brand-title').innerText(), 'TrandingChaart');
   await page.locator('.legend-values').waitFor();
   const scale = page.getByTitle('Alternar entre Escala Linear e Logarítmica');
   const toggle = async (name) => {
@@ -51,6 +52,32 @@ test('windowed chart keeps both scales and draws RSI and MACD through selection 
     return chart.right <= innerWidth + 1 && chart.bottom <= innerHeight + 1 && controls.right <= innerWidth;
   }, null, { timeout: 5000 });
   const priceCanvas = plots.first().locator('td:nth-child(2) canvas').first();
+  const plot = await priceCanvas.boundingBox();
+  const change = page.locator('.legend-change strong');
+  const checkChange = async (index) => {
+    const previous = candles[index - 1];
+    const percent = previous ? 100 * (candles[index].close - previous.close) / previous.close : null;
+    const expected = percent === null ? '—'
+      : (percent > 0 ? '+' : '') + percent.toFixed(2).replace('.', ',') + '%';
+    assert.equal(await change.innerText(), expected);
+  };
+  await checkChange(candles.length - 1);
+  await page.mouse.dblclick(plot.x + plot.width / 2, plot.y + plot.height / 2);
+  const seen = new Set();
+  for (const fraction of [0.002, 0.24, 0.53]) {
+    const oldTime = await page.locator('.legend-time').innerText();
+    await page.mouse.move(plot.x + plot.width * fraction, plot.y + plot.height / 2);
+    await page.waitForFunction(old => document.querySelector('.legend-time').innerText !== old, oldTime);
+    const volume = await page.locator('.legend-values strong').last().innerText();
+    const index = candles.findIndex(c => c.volume === Number(volume));
+    assert.ok(index >= 0 && index < candles.length - 1);
+    seen.add(index);
+    await checkChange(index);
+  }
+  assert.ok(seen.has(0));
+  assert.equal(seen.size, 3);
+  await page.locator('.brand-title').hover();
+  await checkChange(candles.length - 1);
   const handle = await priceCanvas.elementHandle();
   const expectRedraw = async (action) => {
     const before = await priceCanvas.evaluate(canvas => canvas.toDataURL());
