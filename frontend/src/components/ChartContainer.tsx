@@ -20,6 +20,10 @@ import {
   computeMACD,
 } from '../utils/indicators';
 
+const percentFormat = new Intl.NumberFormat('pt-BR', {
+  style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: 'exceptZero',
+});
+
 interface ChartContainerProps {
   symbol: string;
   timeframe: string;
@@ -68,15 +72,15 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
   const latestCandlesRef = useRef<Candle[]>(candles);
   const prevSymbolRef = useRef<string>(symbol);
 
-  // Hover legend state
-  const [legendInfo, setLegendInfo] = useState<{
-    time?: string;
-    open?: number;
-    high?: number;
-    low?: number;
-    close?: number;
-    volume?: number;
-  }>({});
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const hoveredIndex = hoveredTime === null ? -1 : candles.findIndex(c => c.time === hoveredTime);
+  const legendIndex = hoveredIndex >= 0 ? hoveredIndex : candles.length - 1;
+  const candle = candles[legendIndex];
+  const previous = candles[legendIndex - 1];
+  const change = candle && previous && previous.close !== 0
+    ? (candle.close - previous.close) / previous.close
+    : null;
+  const candleColor = candle && candle.close >= candle.open ? 'up' : 'down';
 
   const rsi = indicators.find((i) => i.id === 'rsi');
   const macd = indicators.find((i) => i.id === 'macd');
@@ -220,40 +224,9 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
 
     // Crosshair move listener for OHLC legend
     chart.subscribeCrosshairMove((param) => {
-      const currentCandles = latestCandlesRef.current;
-      if (
-        param.point === undefined ||
-        !param.time ||
-        param.point.x < 0 ||
-        param.point.y < 0
-      ) {
-        if (currentCandles.length > 0) {
-          const last = currentCandles[currentCandles.length - 1];
-          setLegendInfo({
-            time: new Date(last.time * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
-            open: last.open,
-            high: last.high,
-            low: last.low,
-            close: last.close,
-            volume: last.volume,
-          });
-        }
-      } else {
-        const cData = param.seriesData.get(candleSeries) as any;
-        const vData = param.seriesData.get(volumeSeries) as any;
-        if (cData) {
-          setLegendInfo({
-            time: typeof param.time === 'number'
-              ? new Date(param.time * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
-              : String(param.time),
-            open: cData.open,
-            high: cData.high,
-            low: cData.low,
-            close: cData.close,
-            volume: vData?.value,
-          });
-        }
-      }
+      setHoveredTime(param.point && typeof param.time === 'number' && param.seriesData.has(candleSeries)
+        ? param.time
+        : null);
     });
 
     return () => {
@@ -460,17 +433,6 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
         autoScale: true,
       });
     });
-
-    // Default hover info to latest candle
-    const last = candles[candles.length - 1];
-    setLegendInfo({
-      time: new Date(last.time * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
-      open: last.open,
-      high: last.high,
-      low: last.low,
-      close: last.close,
-      volume: last.volume,
-    });
   }, [candles, indicators, symbol, timeframe, pricePrecision]);
 
   return (
@@ -480,16 +442,23 @@ export const ChartContainer: React.FC<ChartContainerProps> = ({
         <div className="legend-symbol-block">
           <span className="legend-symbol">{symbol}</span>
           <span className="legend-timeframe">{timeframe}</span>
+          {candle && (
+            <span className="legend-change">
+              Variação <strong className={change !== null && change > 0 ? 'up' : change !== null && change < 0 ? 'down' : undefined}>
+                {change === null ? '—' : percentFormat.format(change)}
+              </strong>
+            </span>
+          )}
         </div>
 
-        {candles.length > 0 && legendInfo.open !== undefined && (
+        {candle && (
           <div className="legend-values">
-            <span>A: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.open.toFixed(pricePrecision)}</strong></span>
-            <span>M: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.high?.toFixed(pricePrecision)}</strong></span>
-            <span>m: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.low?.toFixed(pricePrecision)}</strong></span>
-            <span>F: <strong className={legendInfo.close! >= legendInfo.open! ? 'up' : 'down'}>{legendInfo.close?.toFixed(pricePrecision)}</strong></span>
-            <span>Vol: <strong>{legendInfo.volume?.toFixed(3)}</strong></span>
-            {legendInfo.time && <span className="legend-time">{legendInfo.time}</span>}
+            <span>A: <strong className={candleColor}>{candle.open.toFixed(pricePrecision)}</strong></span>
+            <span>M: <strong className={candleColor}>{candle.high.toFixed(pricePrecision)}</strong></span>
+            <span>m: <strong className={candleColor}>{candle.low.toFixed(pricePrecision)}</strong></span>
+            <span>F: <strong className={candleColor}>{candle.close.toFixed(pricePrecision)}</strong></span>
+            <span>Vol: <strong>{candle.volume.toFixed(3)}</strong></span>
+            <span className="legend-time">{new Date(candle.time * 1000).toISOString().replace('T', ' ').slice(0, 16)} UTC</span>
           </div>
         )}
 
